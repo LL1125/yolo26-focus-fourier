@@ -1,4 +1,4 @@
-"""Export the detection model to ONNX."""
+"""Export the FocusContourNet detector to ONNX."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ class ONNXWrapper(torch.nn.Module):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Export a detector to ONNX.")
-    parser.add_argument("--model-config", type=Path, default=ROOT / "configs" / "model" / "y26_base.yaml")
+    parser.add_argument("--model-config", type=Path, default=ROOT / "configs" / "model" / "fcn_base.yaml")
     parser.add_argument("--weights", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=ROOT / "outputs" / "model.onnx")
     parser.add_argument("--img-size", type=int, default=640)
