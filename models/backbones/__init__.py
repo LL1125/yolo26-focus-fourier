@@ -1,5 +1,5 @@
 """Backbone exports."""
 
-from models.backbones.yolo26_backbone import YOLO26Backbone
+from models.backbones.fcn_backbone import FCNBackbone
 
-__all__ = ["YOLO26Backbone"]
+__all__ = ["FCNBackbone"]
