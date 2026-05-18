@@ -1,4 +1,4 @@
-"""Visualize placeholder contour predictions from the joint model."""
+"""Visualize placeholder contour predictions from the FocusContourNet contour branch."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ from engine.predictor import Predictor
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Visualize the placeholder contour branch output.")
-    parser.add_argument("--model-config", type=Path, default=ROOT / "configs" / "model" / "y26_focus_fourier.yaml")
+    parser.add_argument("--model-config", type=Path, default=ROOT / "configs" / "model" / "fcn_focus_contour.yaml")
     parser.add_argument("--weights", type=Path, default=None)
     parser.add_argument("--image", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=ROOT / "outputs" / "contour_vis.png")
