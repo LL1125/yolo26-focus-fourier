@@ -1,6 +1,6 @@
 """Detector exports."""
 
-from models.detectors.yolo26_base import YOLO26Base
-from models.detectors.yolo26_focus_fourier import YOLO26FocusFourier
+from models.detectors.fcn_base import FCNBaseDetector
+from models.detectors.fcn_focus_contour import FCNFocusContourDetector
 
-__all__ = ["YOLO26Base", "YOLO26FocusFourier"]
+__all__ = ["FCNBaseDetector", "FCNFocusContourDetector"]
