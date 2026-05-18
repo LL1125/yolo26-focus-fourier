@@ -19,8 +19,8 @@ Recommended installation flow:
 ```bash
 git clone https://github.com/LL1125/focus-contour-net.git
 cd focus-contour-net
-python3.10 -m venv fcn
-source fcn/bin/activate
+conda create -n fcn python=3.10 -y
+conda activate fcn
 python -m pip install --upgrade pip
 pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu124
 pip install -r requirements.txt
