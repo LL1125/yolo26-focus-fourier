@@ -1,0 +1,18 @@
+name: fcn_base
+model_type: fcn_base
+num_classes: 1
+width_mult: 1.0
+depth_mult: 1.0
+in_channels: 3
+strides: [8, 16, 32]
+max_det: 300
+head_channels: 128
+backbone_channels: [32, 64, 128, 256, 512]
+neck_channels: [128, 256, 512]
+enable_focus_plugins: false
+enable_contour_head: false
+focus_plugin_positions: []
+fourier:
+  num_coeffs: 16
+  num_points: 64
+  hidden_dim: 128
