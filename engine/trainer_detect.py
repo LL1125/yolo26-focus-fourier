@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import csv
 from pathlib import Path
 from typing import Any
 
 import torch
+import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -19,12 +21,23 @@ from models.losses.detect_loss_e2e import DetectLossE2E
 class TrainerDetect:
     """Train the baseline detect-only model without external frameworks."""
 
+    RESULTS_HEADER = [
+        "epoch",
+        "train_loss",
+        "val_loss",
+        "val_mean_best_iou",
+        "best_so_far_iou",
+        "learning_rate",
+    ]
+
     def __init__(self, train_config: str | Path | dict[str, Any]) -> None:
         self.cfg = load_yaml(train_config) if not isinstance(train_config, dict) else train_config
         set_seed(int(self.cfg.get("seed", 42)))
         self.device = resolve_device(self.cfg.get("device", "auto"))
         self.output_dir = resolve_project_path(self.cfg.get("output_dir", "runs/detect"))
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.args_path = self.output_dir / "args.yaml"
+        self.results_path = self.output_dir / "results.csv"
 
         self.model_cfg = load_model_config(self.cfg["model_config"])
         self.data_cfg = load_yaml(resolve_project_path(self.cfg["data_config"]))
@@ -88,11 +101,44 @@ class TrainerDetect:
             extra["val_metrics"] = {k: float(v) for k, v in metrics.items()}
         return extra
 
+    def _write_args_file(self) -> None:
+        payload = dict(self.cfg)
+        payload["resolved_output_dir"] = str(self.output_dir)
+        with self.args_path.open("w", encoding="utf-8") as handle:
+            yaml.safe_dump(payload, handle, sort_keys=False, allow_unicode=True)
+
+    def _ensure_results_file(self) -> None:
+        if self.results_path.exists() and self.results_path.stat().st_size > 0:
+            return
+        with self.results_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=self.RESULTS_HEADER)
+            writer.writeheader()
+
+    def _append_results_row(self, epoch: int, train_loss: float, metrics: dict[str, float] | None) -> None:
+        val_loss = float(metrics["val_loss"]) if metrics is not None else float("nan")
+        val_iou = float(metrics["val_mean_best_iou"]) if metrics is not None else float("nan")
+        best_iou = self.best_metric if self.best_metric != float("-inf") else float("nan")
+        learning_rate = float(self.optimizer.param_groups[0]["lr"])
+        row = {
+            "epoch": int(epoch),
+            "train_loss": float(train_loss),
+            "val_loss": val_loss,
+            "val_mean_best_iou": val_iou,
+            "best_so_far_iou": float(best_iou),
+            "learning_rate": learning_rate,
+        }
+        with self.results_path.open("a", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=self.RESULTS_HEADER)
+            writer.writerow(row)
+
     def train(self) -> None:
         """Run the training loop."""
         train_loader, val_loader = self.build_dataloaders()
+        self._write_args_file()
+        self._ensure_results_file()
         print(f"num_train_images={len(train_loader.dataset)}")
         print(f"num_val_images={len(val_loader.dataset)}")
+        print(f"output_dir={self.output_dir}")
 
         epochs = int(self.cfg.get("epochs", 100))
         eval_every = int(self.cfg.get("eval_every", 1))
@@ -112,14 +158,13 @@ class TrainerDetect:
                 running_loss += float(loss_dict["loss"].item())
 
             train_loss = running_loss / max(len(train_loader), 1)
-            print(f"epoch={epoch} train_loss={train_loss:.4f}")
-
             metrics: dict[str, float] | None = None
+            val_loss = float("nan")
+            val_iou = float("nan")
             if (epoch + 1) % eval_every == 0:
                 metrics = self.validator.validate(self.model, val_loader, self.criterion)
                 val_loss = float(metrics["val_loss"])
                 val_iou = float(metrics["val_mean_best_iou"])
-                print(f"epoch={epoch} val_loss={val_loss:.4f} val_mean_best_iou={val_iou:.4f}")
 
                 is_best = (val_iou > self.best_metric) or (
                     val_iou == self.best_metric and val_loss < self.best_val_loss
@@ -140,6 +185,15 @@ class TrainerDetect:
                         f"val_mean_best_iou={self.best_metric:.4f} val_loss={self.best_val_loss:.4f}"
                     )
 
+            self._append_results_row(epoch, train_loss, metrics)
+            current_lr = float(self.optimizer.param_groups[0]["lr"])
+            best_display = self.best_metric if self.best_metric != float("-inf") else float("nan")
+            print(
+                f"epoch={epoch} train_loss={train_loss:.4f} "
+                f"val_loss={val_loss:.4f} val_mean_best_iou={val_iou:.4f} "
+                f"best={best_display:.4f} lr={current_lr:.6f}"
+            )
+
             save_checkpoint(
                 self.output_dir / "last.pt",
                 self.model,
@@ -150,5 +204,6 @@ class TrainerDetect:
 
         print(
             f"training finished | best_epoch={self.best_epoch} "
-            f"best_val_mean_best_iou={self.best_metric:.4f} best_val_loss={self.best_val_loss:.4f}"
+            f"best_val_mean_best_iou={self.best_metric:.4f} "
+            f"best_val_loss={self.best_val_loss:.4f} output_dir={self.output_dir}"
         )
