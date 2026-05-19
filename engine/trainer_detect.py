@@ -37,9 +37,15 @@ class TrainerDetect:
         )
         self.validator = ValidatorDetect(self.device)
         self.start_epoch = 0
+        self.best_metric = float("-inf")
+        self.best_val_loss = float("inf")
+        self.best_epoch = -1
         if self.cfg.get("resume"):
             checkpoint = load_checkpoint(self.cfg["resume"], self.model, self.optimizer, map_location=self.device)
             self.start_epoch = int(checkpoint.get("epoch", 0)) + 1
+            self.best_metric = float(checkpoint.get("best_metric", self.best_metric))
+            self.best_val_loss = float(checkpoint.get("best_val_loss", self.best_val_loss))
+            self.best_epoch = int(checkpoint.get("best_epoch", self.best_epoch))
 
     def build_dataloaders(self) -> tuple[DataLoader, DataLoader]:
         """Build train and validation dataloaders."""
@@ -68,12 +74,28 @@ class TrainerDetect:
             target["labels"] = target["labels"].to(self.device)
             target["boxes"] = target["boxes"].to(self.device)
 
+    def _checkpoint_extra(self, epoch: int, train_loss: float, metrics: dict[str, float] | None) -> dict[str, Any]:
+        extra: dict[str, Any] = {
+            "model_cfg": self.model_cfg,
+            "train_cfg": self.cfg,
+            "train_loss": float(train_loss),
+            "best_metric": float(self.best_metric),
+            "best_val_loss": float(self.best_val_loss),
+            "best_epoch": int(self.best_epoch),
+            "epoch": int(epoch),
+        }
+        if metrics is not None:
+            extra["val_metrics"] = {k: float(v) for k, v in metrics.items()}
+        return extra
+
     def train(self) -> None:
         """Run the training loop."""
         train_loader, val_loader = self.build_dataloaders()
+        print(f"num_train_images={len(train_loader.dataset)}")
+        print(f"num_val_images={len(val_loader.dataset)}")
+
         epochs = int(self.cfg.get("epochs", 100))
         eval_every = int(self.cfg.get("eval_every", 1))
-        save_every = int(self.cfg.get("save_every", 10))
 
         for epoch in range(self.start_epoch, epochs):
             self.model.train()
@@ -92,9 +114,41 @@ class TrainerDetect:
             train_loss = running_loss / max(len(train_loader), 1)
             print(f"epoch={epoch} train_loss={train_loss:.4f}")
 
+            metrics: dict[str, float] | None = None
             if (epoch + 1) % eval_every == 0:
                 metrics = self.validator.validate(self.model, val_loader, self.criterion)
-                print(f"epoch={epoch} val_loss={metrics['val_loss']:.4f} val_mean_best_iou={metrics['val_mean_best_iou']:.4f}")
+                val_loss = float(metrics["val_loss"])
+                val_iou = float(metrics["val_mean_best_iou"])
+                print(f"epoch={epoch} val_loss={val_loss:.4f} val_mean_best_iou={val_iou:.4f}")
 
-            if (epoch + 1) % save_every == 0 or epoch + 1 == epochs:
-                save_checkpoint(self.output_dir / f"epoch_{epoch}.pt", self.model, self.optimizer, epoch, extra={"model_cfg": self.model_cfg})
+                is_best = (val_iou > self.best_metric) or (
+                    val_iou == self.best_metric and val_loss < self.best_val_loss
+                )
+                if is_best:
+                    self.best_metric = val_iou
+                    self.best_val_loss = val_loss
+                    self.best_epoch = epoch
+                    save_checkpoint(
+                        self.output_dir / "best.pt",
+                        self.model,
+                        self.optimizer,
+                        epoch,
+                        extra=self._checkpoint_extra(epoch, train_loss, metrics),
+                    )
+                    print(
+                        f"[best] updated -> epoch={epoch} "
+                        f"val_mean_best_iou={self.best_metric:.4f} val_loss={self.best_val_loss:.4f}"
+                    )
+
+            save_checkpoint(
+                self.output_dir / "last.pt",
+                self.model,
+                self.optimizer,
+                epoch,
+                extra=self._checkpoint_extra(epoch, train_loss, metrics),
+            )
+
+        print(
+            f"training finished | best_epoch={self.best_epoch} "
+            f"best_val_mean_best_iou={self.best_metric:.4f} best_val_loss={self.best_val_loss:.4f}"
+        )
