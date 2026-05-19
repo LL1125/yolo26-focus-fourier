@@ -25,8 +25,12 @@ class TrainerDetect:
         "epoch",
         "train_loss",
         "val_loss",
+        "precision",
+        "recall",
+        "map50",
+        "map50_95",
         "val_mean_best_iou",
-        "best_so_far_iou",
+        "best_so_far_map50_95",
         "learning_rate",
     ]
 
@@ -115,16 +119,25 @@ class TrainerDetect:
             writer.writeheader()
 
     def _append_results_row(self, epoch: int, train_loss: float, metrics: dict[str, float] | None) -> None:
-        val_loss = float(metrics["val_loss"]) if metrics is not None else float("nan")
-        val_iou = float(metrics["val_mean_best_iou"]) if metrics is not None else float("nan")
-        best_iou = self.best_metric if self.best_metric != float("-inf") else float("nan")
+        metrics = metrics or {}
+        val_loss = float(metrics.get("val_loss", float("nan")))
+        precision = float(metrics.get("precision", float("nan")))
+        recall = float(metrics.get("recall", float("nan")))
+        map50 = float(metrics.get("map50", float("nan")))
+        map50_95 = float(metrics.get("map50_95", float("nan")))
+        val_iou = float(metrics.get("val_mean_best_iou", float("nan")))
+        best_map = self.best_metric if self.best_metric != float("-inf") else float("nan")
         learning_rate = float(self.optimizer.param_groups[0]["lr"])
         row = {
             "epoch": int(epoch),
             "train_loss": float(train_loss),
             "val_loss": val_loss,
+            "precision": precision,
+            "recall": recall,
+            "map50": map50,
+            "map50_95": map50_95,
             "val_mean_best_iou": val_iou,
-            "best_so_far_iou": float(best_iou),
+            "best_so_far_map50_95": float(best_map),
             "learning_rate": learning_rate,
         }
         with self.results_path.open("a", newline="", encoding="utf-8") as handle:
@@ -160,17 +173,25 @@ class TrainerDetect:
             train_loss = running_loss / max(len(train_loader), 1)
             metrics: dict[str, float] | None = None
             val_loss = float("nan")
+            precision = float("nan")
+            recall = float("nan")
+            map50 = float("nan")
+            map50_95 = float("nan")
             val_iou = float("nan")
             if (epoch + 1) % eval_every == 0:
                 metrics = self.validator.validate(self.model, val_loader, self.criterion)
                 val_loss = float(metrics["val_loss"])
+                precision = float(metrics["precision"])
+                recall = float(metrics["recall"])
+                map50 = float(metrics["map50"])
+                map50_95 = float(metrics["map50_95"])
                 val_iou = float(metrics["val_mean_best_iou"])
 
-                is_best = (val_iou > self.best_metric) or (
-                    val_iou == self.best_metric and val_loss < self.best_val_loss
+                is_best = (map50_95 > self.best_metric) or (
+                    map50_95 == self.best_metric and val_loss < self.best_val_loss
                 )
                 if is_best:
-                    self.best_metric = val_iou
+                    self.best_metric = map50_95
                     self.best_val_loss = val_loss
                     self.best_epoch = epoch
                     save_checkpoint(
@@ -182,16 +203,16 @@ class TrainerDetect:
                     )
                     print(
                         f"[best] updated -> epoch={epoch} "
-                        f"val_mean_best_iou={self.best_metric:.4f} val_loss={self.best_val_loss:.4f}"
+                        f"map50_95={self.best_metric:.4f} val_loss={self.best_val_loss:.4f}"
                     )
 
             self._append_results_row(epoch, train_loss, metrics)
             current_lr = float(self.optimizer.param_groups[0]["lr"])
             best_display = self.best_metric if self.best_metric != float("-inf") else float("nan")
             print(
-                f"epoch={epoch} train_loss={train_loss:.4f} "
-                f"val_loss={val_loss:.4f} val_mean_best_iou={val_iou:.4f} "
-                f"best={best_display:.4f} lr={current_lr:.6f}"
+                f"epoch={epoch} train_loss={train_loss:.4f} val_loss={val_loss:.4f} "
+                f"P={precision:.4f} R={recall:.4f} mAP50={map50:.4f} mAP50_95={map50_95:.4f} "
+                f"val_mean_best_iou={val_iou:.4f} best_mAP50_95={best_display:.4f} lr={current_lr:.6f}"
             )
 
             save_checkpoint(
@@ -204,6 +225,6 @@ class TrainerDetect:
 
         print(
             f"training finished | best_epoch={self.best_epoch} "
-            f"best_val_mean_best_iou={self.best_metric:.4f} "
+            f"best_map50_95={self.best_metric:.4f} "
             f"best_val_loss={self.best_val_loss:.4f} output_dir={self.output_dir}"
         )
