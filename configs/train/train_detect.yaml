@@ -2,7 +2,7 @@ task: detect
 model_config: configs/model/fcn_base.yaml
 data_config: configs/data/detect_data.yaml
 output_dir: runs/detect
-epochs: 100
+epochs: 50
 batch_size: 8
 num_workers: 4
 img_size: 640
